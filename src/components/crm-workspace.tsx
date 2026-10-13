@@ -53,6 +53,7 @@ export function CrmWorkspace() {
   const [meetingSummary, setMeetingSummary] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [addLeadOpen, setAddLeadOpen] = useState(false);
+  const [leadError, setLeadError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [draggedDeal, setDraggedDeal] = useState<string | null>(null);
@@ -78,19 +79,39 @@ export function CrmWorkspace() {
   }
 
   function addLead(formData: FormData) {
-    const company = String(formData.get("company") || "New company");
+    const company = String(formData.get("company") ?? "").trim();
+    const contact = String(formData.get("contact") ?? "").trim();
+    const name = String(formData.get("deal") ?? "").trim();
+    const rawValue = String(formData.get("value") ?? "").trim();
+    const value = rawValue === "" ? 25000 : Number(rawValue);
+    const owner = String(formData.get("owner") ?? "EE");
+    if (!company || !contact || !name) {
+      setLeadError("Company, primary contact, and opportunity name are required.");
+      return;
+    }
+    if (!Number.isFinite(value) || value < 0) {
+      setLeadError("Enter a valid deal value of zero or more.");
+      return;
+    }
+    if (!["EE", "MK"].includes(owner)) {
+      setLeadError("Choose a valid owner.");
+      return;
+    }
+    const nextId = deals.reduce((max, deal) => {
+      const number = /^DEAL-(\d+)$/.exec(deal.id);
+      return number ? Math.max(max, Number(number[1])) : max;
+    }, 210) + 1;
     const newDeal: Deal = {
-      id: `DEAL-${210 + deals.length}`,
-      name: String(formData.get("deal") || `${company} opportunity`),
-      company,
-      contact: String(formData.get("contact") || "New contact"),
-      initials: company.split(" ").map((word) => word[0]).join("").slice(0, 2).toUpperCase(),
-      value: Number(formData.get("value") || 25000),
-      stage: "New lead", probability: 20, owner: "EE", closeDate: "Sep 30",
+      id: `DEAL-${nextId}`, name, company, contact,
+      initials: company.split(/\s+/).map((word) => word[0]).join("").slice(0, 2).toUpperCase(),
+      value, notes: String(formData.get("notes") ?? "").trim(),
+      stage: "New lead", probability: 20, owner, closeDate: "Sep 30",
       health: "Good", lastActivity: "Just now", nextStep: "Complete lead qualification",
     };
     setDeals((current) => [newDeal, ...current]);
+    setLeadError("");
     setAddLeadOpen(false);
+    setQuery("");
     setView("Pipeline");
     notify("Lead added to pipeline");
   }
@@ -148,7 +169,7 @@ export function CrmWorkspace() {
           </div>
         </header>
         <div className="crm-content">
-          <PageHeader view={view} onAdd={() => view === "Email" ? setEmailWriter(true) : setAddLeadOpen(true)} />
+          <PageHeader view={view} onAdd={() => { setLeadError(""); if (view === "Email") setEmailWriter(true); else setAddLeadOpen(true); }} />
           {view === "Dashboard" && <Dashboard deals={deals} onOpenDeal={setSelectedDeal} onView={setView} onInsight={() => setInsightsOpen(true)} />}
           {view === "Contacts" && <ContactsView rows={query ? filteredContacts : contacts} onOpen={setSelectedContact} />}
           {view === "Pipeline" && <Pipeline deals={query ? filteredDeals : deals} onOpen={setSelectedDeal} onDrag={setDraggedDeal} onDrop={(stage) => { if (draggedDeal) moveDeal(draggedDeal, stage); setDraggedDeal(null); }} />}
@@ -182,8 +203,9 @@ export function CrmWorkspace() {
           <form action={addLead} className="lead-form">
             <div className="form-pair"><label>Company<input name="company" required placeholder="Company name" /></label><label>Primary contact<input name="contact" required placeholder="Full name" /></label></div>
             <label>Opportunity name<input name="deal" required placeholder="e.g. Enterprise rollout" /></label>
-            <div className="form-pair"><label>Estimated value<input name="value" type="number" min="0" placeholder="25000" /></label><label>Owner<select defaultValue="ee"><option value="ee">Emmanuel Emirex</option><option value="mk">Maya Khan</option></select></label></div>
-            <label>Notes<textarea placeholder="Add source, context, or qualification notes…" /></label>
+            <div className="form-pair"><label>Estimated value<input name="value" type="number" min="0" placeholder="25000" /></label><label>Owner<select name="owner" defaultValue="EE"><option value="EE">Emmanuel Emirex</option><option value="MK">Maya Khan</option></select></label></div>
+            <label>Notes<textarea name="notes" maxLength={5000} placeholder="Add source, context, or qualification notes…" /></label>
+            {leadError && <p role="alert">{leadError}</p>}
             <div className="modal-actions"><button type="button" className="crm-button secondary" onClick={() => setAddLeadOpen(false)}>Cancel</button><button type="submit" className="crm-button primary">Add lead</button></div>
           </form>
         </Modal>
@@ -461,7 +483,8 @@ function DealPanel({ deal, onClose, onWrite, onMove }: { deal: Deal; onClose: ()
           <div className="deal-drawer-title"><span className="company-avatar large">{deal.initials}</span><div><h2>{deal.name}</h2><p>{deal.company}</p></div></div>
           <div className="deal-headline"><div><span>DEAL VALUE</span><strong>{currency.format(deal.value)}</strong></div><div><span>PROBABILITY</span><strong>{deal.probability}%</strong></div><div><span>EXPECTED CLOSE</span><strong>{deal.closeDate}</strong></div></div>
           <div className="drawer-actions"><button className="crm-button primary" type="button" onClick={onWrite}><Mail size={14} /> Email contact</button><button className="crm-button secondary" type="button"><Phone size={14} /> Log call</button><button className="crm-button secondary" type="button"><CalendarDays size={14} /> Meet</button></div>
-          <section className="deal-details"><h3>Deal details</h3><div><span>Stage</span><select value={deal.stage} onChange={(event) => onMove(event.target.value as Stage)}>{stages.map((stage) => <option key={stage}>{stage}</option>)}</select><span>Health</span><b className={`health health-${deal.health.toLowerCase().replace(" ", "-")}`}><i />{deal.health}</b><span>Owner</span><b><Avatar initials={deal.owner} size="small" /> Emmanuel Emirex</b><span>Primary contact</span><b>{deal.contact}</b><span>Next step</span><b>{deal.nextStep}</b></div></section>
+          <section className="deal-details"><h3>Deal details</h3><div><span>Stage</span><select value={deal.stage} onChange={(event) => onMove(event.target.value as Stage)}>{stages.map((stage) => <option key={stage}>{stage}</option>)}</select><span>Health</span><b className={`health health-${deal.health.toLowerCase().replace(" ", "-")}`}><i />{deal.health}</b><span>Owner</span><b><Avatar initials={deal.owner} size="small" /> {({ EE: "Emmanuel Emirex", MK: "Maya Khan", AO: "Amara Okafor" } as Record<string, string>)[deal.owner] ?? deal.owner}</b><span>Primary contact</span><b>{deal.contact}</b><span>Next step</span><b>{deal.nextStep}</b></div></section>
+          {deal.notes && <section className="deal-details"><h3>Qualification notes</h3><p style={{ whiteSpace: "pre-wrap" }}>{deal.notes}</p></section>}
           <section className="deal-ai-brief"><div><Sparkles size={15} /><strong>Signal brief</strong></div><p>{deal.health === "At risk" ? "Engagement has dropped despite strong initial interest. Re-anchor on the business case and make the next step easy to accept." : "Momentum is healthy. Keep the decision process moving and confirm ownership of the next milestone."}</p><button type="button" onClick={onWrite}>Draft recommended follow-up <ArrowRight size={12} /></button></section>
           <section className="drawer-timeline"><h3>Activity</h3>{activities.slice(0, 3).map((item) => <div key={item.title}><i /><div><strong>{item.title}</strong><p>{item.detail}</p><small>{item.time}</small></div></div>)}</section>
         </div>

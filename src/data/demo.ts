@@ -13,6 +13,7 @@ export type Deal = {
   health: "Strong" | "Good" | "At risk";
   lastActivity: string;
   nextStep: string;
+  notes?: string;
 };
 
 export const stages: Stage[] = ["New lead", "Qualified", "Proposal", "Negotiation", "Won"];
